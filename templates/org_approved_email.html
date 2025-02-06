@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Registration Approved</title>
+</head>
+<body class="bg-gray-100 text-gray-800">
+    <div class="max-w-lg mx-auto p-6 bg-white shadow-md rounded-lg">
+        <h2 class="text-xl font-semibold text-gray-900">Congratulations {{ organisation.business_name }},</h2>
+        <p class="mt-2">Your registration has been <strong>approved!</strong> Your admin credentials are as follows:</p>
+        <div class="mt-4 bg-gray-200 p-4 rounded-md">
+            <p><strong>Username:</strong> {{ admin_credentials.username }}</p>
+            <p><strong>Password:</strong> {{ admin_credentials.password }}</p>
+        </div>
+        <p class="mt-4">Please log in and set up your account.</p>
+        <p class="mt-6 font-semibold">Best Regards,</p>
+        <p>JemaERP Team</p>
+    </div>
+</body>
+</html>
