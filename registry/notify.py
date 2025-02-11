@@ -10,9 +10,10 @@ from os.path import basename
 
 from django.core.validators import validate_email
 
+from api.utility.common import json_super_serializer
 # from api.interfaces.sms_interface import SMSInterface
 from audit.backend.services import NotificationService, NotificationTypeService, TransactionService, TemplateService
-from Backend.base.services import OrganisationService
+from Backend.base.services import OrganisationService, StateService
 from django.conf import settings
 from typing import Dict, Any, List, Optional, Type
 
@@ -53,64 +54,66 @@ class NotificationServiceHandler(TemplateManagementEngine):
             log.exception('replace_tags Exception: %s', e)
         return template_string
 
-    # def send_notification(self, notifications: List[Dict[str, Any]], trans=None, attachment=None, cc=None):
-    #     """Send notifications through the Notifications Bus."""
-    #     if not notifications:
-    #         return None
-    #     try:
-    #         for notification_data in notifications:
-    #             message_type = notification_data.get('message_type')
-    #             message_code = notification_data.get('message_code', 'LP0008')
-    #             organisation_id = notification_data.get('organisation_id')
-    #             destination = notification_data.get('destination', '')
-    #             replace_tags = notification_data.get('replace_tags', {})
-    #             confirmation_code = notification_data.get('confirmation_code', '')
-    #
-    #             notification_type = NotificationTypeService().get(
-    #                 name="SMS" if message_type == '1' else "EMAIL"
-    #             )
-    #             corporate = OrganisationService().get(id=organisation_id)
-    #             template = TemplateService().filter(
-    #                 code=message_code, corporate=corporate
-    #             )
-    #
-    #             if template:
-    #                 template = template.first()
-    #                 custom_message = getattr(template, notification_data.get('lang', ''), '')
-    #                 message = self.replace_tags(custom_message, **replace_tags)
-    #                 replace_tags['message'] = message
-    #             else:
-    #                 message = json.dumps(replace_tags, default=json_super_serializer)
-    #
-    #             notification = NotificationService().create(
-    #                 corporate=corporate,
-    #                 title=message_code,
-    #                 destination=destination,
-    #                 message=message,
-    #                 state=StateService().get(name="Complete"),
-    #                 notification_type=notification_type
-    #             )
-    #             notification_response = {'code': '400.001.007'}
-    #             if notification_type.name == "SMS":
-    #                 notification_response = self._send_sms_notification(destination, message, confirmation_code, organisation_id)
-    #             else:
-    #                 if attachment:
-    #                     notification_response = self._send_email_with_attachment(
-    #                         destination, message, corporate.name, attachment, cc
-    #                     )
-    #                 else:
-    #                     notification_response = self._send_email_without_attachment(
-    #                         destination, message, corporate.name, cc
-    #                     )
-    #             if notification_response['code'] != '200.001.001':
-    #                 NotificationService().update(pk=notification.id, state=StateService().get(name="Failed"))
-    #             if trans:
-    #                 self._update_transaction_notifications(trans, notification_response)
-    #         return 'success'
-    #     except Exception as e:
-    #         log.exception("send_notification: %s", e)
-    #         return None
-    #
+    def send_notification(self, notifications: List[Dict[str, Any]], trans=None, attachment=None, cc=None):
+        """Send notifications through the Notifications Bus."""
+        if not notifications:
+            return None
+        try:
+            for notification_data in notifications:
+                message_type = notification_data.get('message_type')
+                message_code = notification_data.get('message_code', 'LP0008')
+                organisation_id = notification_data.get('organisation_id')
+                destination = notification_data.get('destination', '')
+                replace_tags = notification_data.get('replace_tags', {})
+                confirmation_code = notification_data.get('confirmation_code', '')
+
+                notification_type = NotificationTypeService().get(
+                    name="SMS" if message_type == '1' else "EMAIL"
+                )
+                corporate = OrganisationService().get(id=organisation_id)
+                template = TemplateService().filter(
+                    code=message_code, corporate=corporate
+                )
+
+                if template:
+                    template = template.first()
+                    custom_message = getattr(template, notification_data.get('lang', ''), '')
+                    message = self.replace_tags(custom_message, **replace_tags)
+                    replace_tags['message'] = message
+                else:
+                    print("I am here formulating my message ++++")
+                    message = json.dumps(replace_tags)
+                    print(f"print This is my message{message}")
+
+                notification = NotificationService().create(
+                    corporate=corporate,
+                    title=message_code,
+                    destination=destination,
+                    message=message,
+                    state=StateService().get(name="Complete"),
+                    notification_type=notification_type
+                )
+                notification_response = {'code': '400.001.007'}
+                if notification_type.name == "SMS":
+                    notification_response = self._send_sms_notification(destination, message, confirmation_code, organisation_id)
+                else:
+                    if attachment:
+                        notification_response = self._send_email_with_attachment(
+                            destination, message, corporate.name, attachment, cc
+                        )
+                    else:
+                        notification_response = self._send_email_without_attachment(
+                            destination, message, corporate.name, cc
+                        )
+                if notification_response['code'] != '200.001.001':
+                    NotificationService().update(pk=notification.id, state=StateService().get(name="Failed"))
+                if trans:
+                    self._update_transaction_notifications(trans, notification_response)
+            return 'success'
+        except Exception as e:
+            log.exception("send_notification: %s", e)
+            return None
+
     # def _send_sms_notification(self, destination, message, confirmation_code, corporate_id):
     #     """Send SMS using Corporates SMS Sender API."""
     #     try:

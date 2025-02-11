@@ -15,13 +15,18 @@ class BaseModel(models.Model):
 
 class GenericBaseModel(BaseModel):
     name = models.CharField(max_length=100)
+    description = models.CharField(max_length=100, null=True, blank=True)
 
-    def __str__(self):
-        return self.name
+    class Meta:
+        abstract = True  # <-- Mark the model as abstract
+
 
 class TransactionType(GenericBaseModel):
     simple_name = models.CharField(max_length=100)
     class_name = models.CharField(max_length=100)
+
+    def  __str__(self):
+        return self.name
 
 class Transaction(GenericBaseModel):
     transaction_type = models.ForeignKey(TransactionType, on_delete=models.CASCADE, related_name="logs")
@@ -34,6 +39,9 @@ class Transaction(GenericBaseModel):
     response_code = models.CharField(max_length=10)
     notification_response = models.TextField()
     record = models.TextField()
+
+    def  __str__(self):
+        return self.name
 
 class Department(GenericBaseModel):
     pass
@@ -146,3 +154,53 @@ class ForgotPassword(BaseModel):
 
     def is_otp_expired(self):
         return timezone.now() - self.otp_created_at > timezone.timedelta(minutes=5)
+
+class NotificationType(GenericBaseModel):
+    """
+    A simple model to distinguish between SMS and EMAIL notifications.
+    """
+    pass
+
+
+class Template(models.Model):
+    """
+    A template for a notification message. In this example we store a dictionary of
+    language-to-message mappings in a JSONField (available in Django 3.1+).
+    This allows the service to retrieve a language-specific message using getattr().
+    """
+    code = models.CharField(max_length=50)
+    corporate = models.ForeignKey(Organisation, on_delete=models.CASCADE)
+    translations = models.JSONField(default=dict, blank=True)  # e.g., {"en": "Hello", "fr": "Bonjour"}
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __getattr__(self, item):
+        """
+        Allow dynamic attribute access to language strings.
+        For example, if a Template instance has translations = {"en": "Hello"},
+        then getattr(template, 'en') will return "Hello".
+        """
+        # Note: This is only called if the attribute is not found by the normal mechanism.
+        if isinstance(self.translations, dict) and item in self.translations:
+            return self.translations.get(item, '')
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{item}'")
+
+    def __str__(self):
+        return f"{self.code} for {self.corporate}"
+
+
+class Notification(models.Model):
+    """
+    A record of a sent (or attempted) notification.
+    """
+    corporate = models.ForeignKey(Organisation, on_delete=models.CASCADE)
+    title = models.CharField(max_length=100)
+    destination = models.CharField(max_length=255)
+    message = models.TextField()
+    state = models.ForeignKey(State, on_delete=models.CASCADE)
+    notification_type = models.ForeignKey(NotificationType, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.title} to {self.destination}"
+

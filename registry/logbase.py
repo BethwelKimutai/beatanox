@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from django.db import transaction
 
 from .notify import NotificationServiceHandler
-from .responseprovider import ResponseProvider
+from registry.responseprovider import ResponseProvider
 from Authentication.models import Transaction
 from api.utility.common import get_request_data
 import smtplib
@@ -91,7 +91,7 @@ class TransactionLogBase(ResponseProvider, NotificationServiceHandler):
 	def send_user_email(self, message, subject, to_address):
 		"""
 		"""
-		from_address = "mvpmtech@gmail.com"
+		from_address = "jemaerp@gmail.com"
 		msg = MIMEMultipart()
 		msg['From'] = from_address
 		# msg['Reply-To'] = reply_to
@@ -105,7 +105,7 @@ class TransactionLogBase(ResponseProvider, NotificationServiceHandler):
 		server.ehlo()
 		server.starttls()
 		server.ehlo()
-		server.login("mvpmtech@gmail.com", "zayxyuereoavuldi")
+		server.login("jemaerp@gmail.com", "nmwirqftasmwmits")
 		server.set_debuglevel(0)
 		server.sendmail(msg['To'], toaddrs, msg.as_string())
 		server.close()

@@ -5,10 +5,9 @@ import string
 from django.http import QueryDict
 from django.template.loader import render_to_string
 from django.utils import timezone
-from django.utils.timezone import now
 
-from api.notify import NotificationServiceHandler
-from api.registry import ServiceRegistry
+
+from registry.registry import ServiceRegistry
 
 
 
@@ -84,28 +83,23 @@ def send_otp_email(user):
         "otp": otp,
         "is_valid": True
     })
-    print(session)
 
     try:
         # Render OTP email template
         html_content = render_to_string('otp_email_template.html', {'otp': otp})
 
         # Send email using NotificationServiceHandler
-        email_service = NotificationServiceHandler()
-        email_service._send_email(
-            recipient=user.email,
-            subject="Your OTP Code",
-            body=html_content,
-            content_type="text/html"
-        )
-
+        from registry.logbase import TransactionLogBase
+        email_service = TransactionLogBase()
+        email_service.send_user_email(message=f"Your Verification OTP is {otp}", subject="Verification OTP", to_address=user.email)
         return otp
 
     except Exception as e:
-        from api.responseprovider import ResponseProvider
+        from registry.responseprovider import ResponseProvider
         response_provider = ResponseProvider(data={"message": f"error{str(e)}"}, message="Success", code=200)
         return response_provider.exception()
 
 def otp_expired(self):
-    return timezone.now() - self.otp_created_at > timezone.timedelta(hours=8)
+    is_expired = timezone.now() - self.otp_created_at > timezone.timedelta(hours=8)
+    return is_expired
 
