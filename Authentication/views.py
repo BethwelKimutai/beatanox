@@ -1,3 +1,5 @@
+from pyexpat.errors import messages
+
 from django.contrib.auth import authenticate
 from django.views.decorators.csrf import csrf_exempt
 from jwt import ExpiredSignatureError, decode
@@ -10,7 +12,7 @@ from registry.logbase import TransactionLogBase
 from registry.notify import NotificationServiceHandler
 from registry.registry import ServiceRegistry
 from registry.responseprovider import ResponseProvider
-from api.utility.common import get_clean_data, send_otp_email, otp_expired, generate_otp
+from api.utility.common import get_clean_data, send_otp_email, otp_expired, generate_otp, generate_random_password
 from api.utility.tokens import issue_tokens
 from templates.mail_templates_manager import TemplateManagementEngine
 
@@ -65,7 +67,6 @@ def login(request):
         # If there is no valid session, generate and send a new OTP.
         if not session:
             otp = generate_otp()  # Your OTP generation function.
-
             # Prepare the replacement values for the template.
             replace_items = {"otp": otp}
 
@@ -79,7 +80,7 @@ def login(request):
                 "message_type": "2",
                 "destination": user.email,
                 "message": message,
-                "corporate_id": user.organisation,
+                "organisation_id": str(user.organisation.id),
             }]
 
             notification_handler.send_notification(notifications= notification_items)
@@ -101,24 +102,180 @@ def login(request):
     except Exception as e:
         return ResponseProvider(message=str(e), code=500).exception()
 
+
 @csrf_exempt
 def create_organization(request):
+    """
+    Create organization view:
+
+    - Validates required organisation fields (non-media) and nested representative details.
+    - Creates the organisation representative first, then creates the organisation using its ID.
+    - Sets is_approved to False.
+    - Sends an email notifying that the organisation has been created and is pending approval.
+    """
     try:
         data = get_clean_data(request)
-        required_fields = ["name"]
 
-        if TransactionLogBase().has_missing_required_fields(data, required_fields):
-            return ResponseProvider(message="Organization name is required", code=400).bad_request()
+        # Define required fields for organisation and its representative.
+        org_required_fields = ["name", "email", "physical_address", "phone_no", "representative"]
+        rep_required_fields = ["name"]
 
-        organization = ServiceRegistry().database("Organisation", "create", data=data)
+        # Validate organisation required fields.
+        if TransactionLogBase().has_missing_required_fields(data, org_required_fields):
+            return ResponseProvider(message="All organisation fields are required", code=400).bad_request()
+
+        # Validate that representative data is provided as a dict.
+        representative_data = data.get("representative")
+        if not isinstance(representative_data, dict):
+            return ResponseProvider(
+                message="Representative data must be provided as an object", code=400).bad_request()
+
+        # Validate representative required fields.
+        if TransactionLogBase().has_missing_required_fields(data, rep_required_fields):
+            return ResponseProvider(message="All representative fields are required", code=400).bad_request()
+
+        # convert the role in representative to id
+        if "role" in representative_data:
+            representative_data["role_id"] = representative_data.pop("role")
+
+        # Create the organisation representative first.
+        representative = ServiceRegistry().database(
+            model_name="Representative",
+            operation="create",
+            data=representative_data
+        )
+
+        # Remove the nested representative object and add the representative_id.
+        data.pop("representative", None)
+        data["org_rep_id"] = representative["id"]
+
+        # Set is_approved to False.
+        data["is_approved"] = False
+
+        # Create the organisation.
+        organization = ServiceRegistry().database(
+            model_name="Organisation",
+            operation="create",
+            data=data
+        )
+
+        replace_items = {
+            "organization" : organization['name']
+        }
+
+        # Send a creation email notifying that the organisation is pending approval.
+        notification_handler = NotificationServiceHandler()
+        message = notification_handler.send_org_created_email(**replace_items)
+        notification_items = [{
+            "message_type": "2",
+            "destination": organization["email"],
+            "message": message,
+            "organisation_id": organization["id"],
+        }]
+        notification_handler.send_notification(notifications=notification_items)
+
         return ResponseProvider(
             data={"organization_id": organization["id"]},
-            message="Organization created successfully",
+            message="Organization created successfully and is pending approval",
             code=201
         ).success()
+
     except Exception as e:
         return ResponseProvider(message=f"Error creating organization: {e}", code=500).exception()
 
+
+@csrf_exempt
+def approve_organization(request):
+    """
+    Approve or reject an organization.
+
+    Expected JSON data:
+    {
+      "organization_id": <id>,
+      "approval": "yes"  // or "no"
+    }
+
+    If approved ("yes"):
+      - Updates is_approved to True.
+      - Generates admin credentials:
+          • Username: organisation's email before '@example.com'
+          • Password: Random 12-character password.
+      - Sends an email with the approval notification and admin credentials.
+
+    If rejected ("no"):
+      - Leaves is_approved as False.
+      - Sends a rejection email.
+    """
+    try:
+        data = get_clean_data(request)
+        organization_id = data.get("organization_id")
+        approval_decision = data.get("approval")
+
+        if not organization_id or approval_decision not in ["yes", "no"]:
+            return ResponseProvider(
+                message="organization_id and approval (yes/no) are required", code=400
+            ).bad_request()
+
+        # Retrieve the organisation.
+        organization = ServiceRegistry().database(
+            model_name="Organisation",
+            operation="get",
+            data={"id": organization_id}
+        )
+        if not organization:
+            return ResponseProvider(
+                message="Organization not found", code=404
+            ).bad_request()
+
+        notification_handler = NotificationServiceHandler()
+
+        if approval_decision == "yes":
+            # Approve the organisation.
+            organization = ServiceRegistry().database(
+                model_name="Organisation",
+                operation="update",
+                instance_id=organization_id,
+                data={"is_approved": True}
+            )
+
+            # Generate admin credentials.
+            # Username: part of the organisation's email before '@'
+            org_email = organization["email"]
+            username = org_email.split("@")[0]
+            password = generate_random_password(12)
+
+            # (Optionally, update the organisation record with these credentials or create an admin user record.)
+
+            message = notification_handler.send_approved_email()
+            notification_items = [{
+                "message_type": "2",
+                "destination": organization["email"],
+                "message": message,
+                "organisation_id": organization["id"]
+            }]
+            notification_handler.send_notification(notifications=notification_items)
+
+            return ResponseProvider(
+                message="Organization approved and admin credentials sent",
+                code=200
+            ).success()
+        else:
+            # For rejection, send a rejection email.
+            message = notification_handler.rejection_email()
+            notification_items = [{
+                "message_type": "2",
+                "destination": organization["email"],
+                "message": message,
+                "organisation_id": organization["id"]
+            }]
+            notification_handler.send_notification(notifications=notification_items)
+            return ResponseProvider(
+                message="Organization rejected and notification sent",
+                code=200
+            ).success()
+
+    except Exception as e:
+        return ResponseProvider(message=f"Error in organization approval: {e}", code=500).exception()
 
 @csrf_exempt
 def register_user(request):
@@ -297,4 +454,105 @@ def refresh_token_view(request):
     except ExpiredSignatureError:
         return ResponseProvider(message="Refresh token expired. Please login again", code=401).unauthorized()
     except Exception as e:
-        return ResponseProvider(message=str(e), code=500).server_error()
+        return ResponseProvider(message=str(e), code=500).exception()
+
+@csrf_exempt
+def create_role(request):
+    try:
+        data = get_clean_data(request)
+
+        name = data.get("name")
+        description = data.get("description")
+
+        if not name and not description:
+            return ResponseProvider({"message": "name and description required"},code =400).bad_request()
+
+        ServiceRegistry().database("roles", "create", data={
+            "name": name,
+            "description": description,
+        })
+        return ResponseProvider({"message": "Role created successfully"}, code=200).success()
+
+    except Exception as e:
+        return ResponseProvider(message=str(e), code=500).exception()
+
+@csrf_exempt
+def create_department(request):
+    try:
+        data = get_clean_data(request)
+
+        name = data.get("name")
+        description = data.get("description")
+
+        if not name and not description:
+            return ResponseProvider({"message": "name and description required"},code =400).bad_request()
+
+        ServiceRegistry().database("department", "create", data={
+            "name": name,
+            "description": description,
+        })
+        return ResponseProvider({"message": "department created successfully"}, code=200).success()
+
+    except Exception as e:
+        return ResponseProvider(message=str(e), code=500).exception()
+
+@csrf_exempt
+def create_permissions(request):
+    try:
+        data = get_clean_data(request)
+
+        name = data.get("name")
+        description = data.get("description")
+
+        if not name and not description:
+            return ResponseProvider({"permissions": "name and description required"},code =400).bad_request()
+
+        ServiceRegistry().database("role", "create", data={
+            "name": name,
+            "description": description,
+        })
+        return ResponseProvider({"message": "permission created successfully"}, code=200).success()
+
+    except Exception as e:
+        return ResponseProvider(message=str(e), code=500).exception()
+
+@csrf_exempt
+def create_state(request):
+    try:
+        data = get_clean_data(request)
+
+        name = data.get("name")
+        description = data.get("description")
+
+        if not name and not description:
+            return ResponseProvider({"message": "name and description required"},code =400).bad_request()
+
+        ServiceRegistry().database("state", "create", data={
+            "name": name,
+            "description": description,
+        })
+        return ResponseProvider({"message": "state created successfully"}, code=200).success()
+
+    except Exception as e:
+        return ResponseProvider(message=str(e), code=500).exception()
+
+@csrf_exempt
+def create_notification_type(request):
+    try:
+        data = get_clean_data(request)
+
+        name = data.get("name")
+        description = data.get("description")
+
+        if not name and not description:
+            return ResponseProvider({"message": "name and description required"},code =400).bad_request()
+
+        ServiceRegistry().database("notificationtype", "create", data={
+            "name": name,
+            "description": description,
+        })
+        return ResponseProvider({"message": "notificationtype created successfully"}, code=200).success()
+
+    except Exception as e:
+        return ResponseProvider(message=str(e), code=500).exception()
+

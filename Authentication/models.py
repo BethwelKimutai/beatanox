@@ -170,7 +170,7 @@ class Template(models.Model):
     """
     code = models.CharField(max_length=50)
     corporate = models.ForeignKey(Organisation, on_delete=models.CASCADE)
-    translations = models.JSONField(default=dict, blank=True)  # e.g., {"en": "Hello", "fr": "Bonjour"}
+    translations = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

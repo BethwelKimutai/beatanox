@@ -37,22 +37,6 @@ class NotificationServiceHandler(TemplateManagementEngine):
             log.exception('%s replace_tags Exception: %s', self.__class__.__name__, e)
         return response_string
 
-    def replace_tags(self, template_string, **kwargs):
-        """
-        Replaces all the occurrences of replace tags with the passed in arguments.
-        @param template_string: The template string we are supposed to replace tags.
-        @type template_string: str
-        @param kwargs: The key->word arguments representing the tags in the string without []
-        @return: The template string replaced accordingly.
-        @rtype: str
-        """
-        try:
-            for k, v in kwargs.items():
-                template_string = template_string.replace('[%s]' % str(k), str(v))
-            return template_string
-        except Exception as e:
-            log.exception('replace_tags Exception: %s', e)
-        return template_string
 
     def send_notification(self, notifications: List[Dict[str, Any]], trans=None, attachment=None, cc=None):
         """Send notifications through the Notifications Bus."""
@@ -61,8 +45,8 @@ class NotificationServiceHandler(TemplateManagementEngine):
         try:
             for notification_data in notifications:
                 message_type = notification_data.get('message_type')
-                message_code = notification_data.get('message_code', 'LP0008')
-                organisation_id = notification_data.get('organisation_id')
+                message_code = notification_data.get('message_code')
+                corporate_id = notification_data.get('organisation_id')
                 destination = notification_data.get('destination', '')
                 replace_tags = notification_data.get('replace_tags', {})
                 confirmation_code = notification_data.get('confirmation_code', '')
@@ -70,24 +54,13 @@ class NotificationServiceHandler(TemplateManagementEngine):
                 notification_type = NotificationTypeService().get(
                     name="SMS" if message_type == '1' else "EMAIL"
                 )
-                corporate = OrganisationService().get(id=organisation_id)
-                template = TemplateService().filter(
-                    code=message_code, corporate=corporate
-                )
+                corporate = OrganisationService().get(id=corporate_id)
 
-                if template:
-                    template = template.first()
-                    custom_message = getattr(template, notification_data.get('lang', ''), '')
-                    message = self.replace_tags(custom_message, **replace_tags)
-                    replace_tags['message'] = message
-                else:
-                    print("I am here formulating my message ++++")
-                    message = json.dumps(replace_tags)
-                    print(f"print This is my message{message}")
+                message = notification_data.get('message', '')
 
                 notification = NotificationService().create(
                     corporate=corporate,
-                    title=message_code,
+                    title=message_type,
                     destination=destination,
                     message=message,
                     state=StateService().get(name="Complete"),
@@ -95,16 +68,18 @@ class NotificationServiceHandler(TemplateManagementEngine):
                 )
                 notification_response = {'code': '400.001.007'}
                 if notification_type.name == "SMS":
-                    notification_response = self._send_sms_notification(destination, message, confirmation_code, organisation_id)
+                    notification_response = self._send_sms_notification(destination, message, confirmation_code, corporate_id)
                 else:
-                    if attachment:
-                        notification_response = self._send_email_with_attachment(
-                            destination, message, corporate.name, attachment, cc
-                        )
-                    else:
+                    # if attachment:
+                    #     notification_response = self._send_email_with_attachment(
+                    #         destination, message, corporate.name, attachment, cc
+                    #     )
+                    # else:
+                        print("I am here sending messagew++++++")
                         notification_response = self._send_email_without_attachment(
                             destination, message, corporate.name, cc
                         )
+                print("I am here sending messagew++++++ %s" % notification_response)
                 if notification_response['code'] != '200.001.001':
                     NotificationService().update(pk=notification.id, state=StateService().get(name="Failed"))
                 if trans:
@@ -185,8 +160,8 @@ class NotificationServiceHandler(TemplateManagementEngine):
 
     def _send_email_without_attachment(self, destination, message, corporate_name, cc):
         """Send Email without attachment."""
-        if not validate_email(destination):
-            return {'code': '400.001.005'}
+        # if not validate_email(destination):
+        #     return {'code': '400.001.005'}
 
         subject = f"Email Notification - {corporate_name}" or "Dime System"
         try:
@@ -194,7 +169,7 @@ class NotificationServiceHandler(TemplateManagementEngine):
                 recipient_email=destination,
                 subject=subject,
                 message=message,
-                reply_to=destination,
+                reply_to="noreply",
                 sender="jemaerp@gmail.com",
                 from_address="jemaerp@gmail.com",
                 cc=cc,

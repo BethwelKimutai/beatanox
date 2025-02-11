@@ -103,3 +103,6 @@ def otp_expired(self):
     is_expired = timezone.now() - self.otp_created_at > timezone.timedelta(hours=8)
     return is_expired
 
+def generate_random_password(length=12):
+    characters = string.ascii_letters + string.digits + string.punctuation
+    return ''.join(random.choice(characters) for _ in range(length))

@@ -86,7 +86,7 @@ WSGI_APPLICATION = 'Backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'JemaErp',  # db name
+        'NAME': 'Beatanox',
         'USER': 'root',  # username
         'PASSWORD': '@Blackforest1',
         'HOST': 'localhost',
